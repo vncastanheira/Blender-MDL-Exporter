@@ -1,4 +1,4 @@
-Quake MDL format
+Quake MDL format (for Blender 2.7x)
 written by Bill Currie
 modified by epiplon
 

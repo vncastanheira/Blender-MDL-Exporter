@@ -277,7 +277,7 @@ def process_frame(mdl, scene, frame, vertmap, ingroup = False,
         mdl.frames += fr.frames[:-1]
         return fr.frames[-1]
     scene.frame_set(int(frameno), frameno - int(frameno))
-    mesh = mdl.obj.to_mesh(scene, True, 'PREVIEW') #wysiwyg?
+    mesh = mdl.obj.to_mesh()
     if mdl.obj.qfmdl.xform:
         mesh.transform(mdl.obj.matrix_world)
     fr = make_frame(mesh, vertmap)
@@ -286,7 +286,7 @@ def process_frame(mdl, scene, frame, vertmap, ingroup = False,
 
 def export_mdl(operator, context, filepath):
     obj = context.active_object
-    mesh = obj.to_mesh(context.scene, True, 'PREVIEW') #wysiwyg?
+    mesh = obj.to_mesh()
     #if not check_faces(mesh):
     #    operator.report({'ERROR'},
     #                    "Mesh has faces with more than 3 vertices.")
@@ -310,7 +310,7 @@ def export_mdl(operator, context, filepath):
         curframe = context.scene.frame_current
         for fno in range(1, curframe + 1):
             context.scene.frame_set(fno)
-            mesh = obj.to_mesh(context.scene, True, 'PREVIEW') #wysiwyg?
+            mesh = obj.to_mesh()
             if mdl.obj.qfmdl.xform:
                 mesh.transform(mdl.obj.matrix_world)
             mdl.frames.append(make_frame(mesh, vertmap))

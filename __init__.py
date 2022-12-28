@@ -24,11 +24,11 @@
 bl_info = {
     "name": "Quake MDL format",
     "author": "Bill Currie (epiplon build 4)",
-    "blender": (2, 6, 3),
+    "blender": (2, 80, 3),
     "api": 35622,
     "location": "File > Import-Export",
     "description": "Import-Export Quake MDL (version 6) files. (.mdl)",
-    "warning": "not even alpha",
+    # "warning": "it works",
     "wiki_url": "",
     "tracker_url": "",
 #    "support": 'OFFICIAL',
@@ -159,19 +159,23 @@ def menu_func_export(self, context):
 
 
 def register():
-    bpy.utils.register_module(__name__)
+    # bpy.utils.register_module(__name__)
+    bpy.utils.register_class(ImportMDL6)
+    bpy.utils.register_class(ExportMDL6)
 
-    bpy.types.Object.qfmdl = PointerProperty(type=QFMDLSettings)
+    # bpy.types.Object.qfmdl = PointerProperty(type=QFMDLSettings)
 
-    bpy.types.INFO_MT_file_import.append(menu_func_import)
-    bpy.types.INFO_MT_file_export.append(menu_func_export)
+    bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
+    bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
 
 
 def unregister():
-    bpy.utils.unregister_module(__name__)
+    # bpy.utils.unregister_module(__name__)
+    bpy.utils.unregister_class(ExportMDL6)
+    bpy.utils.unregister_class(ImportMDL6)
 
-    bpy.types.INFO_MT_file_import.remove(menu_func_import)
-    bpy.types.INFO_MT_file_export.remove(menu_func_export)
+    bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
+    bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
 
 if __name__ == "__main__":
     register()

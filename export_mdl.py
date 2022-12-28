@@ -95,21 +95,27 @@ def null_skin(size):
     return skin
 
 def active_uv(mesh):
-    for uvt in mesh.uv_textures:
+    for uvt in mesh.uv_layers:
         if uvt.active:
             return uvt
     return None
 
+def get_materials_images(mesh):
+    node_trees = [m.node_tree for m in mesh.materials]
+    images = []
+    for nt in node_trees:
+        for n in nt.nodes:
+            if n.bl_idname == 'ShaderNodeTexImage':
+                images.append(n.image)
+            
+    return images
+
 def make_skin(mdl, mesh):
-    uvt = active_uv(mesh)
-    if (not uvt or not uvt.data or not uvt.data[0].image):
-        mdl.skinwidth, mdl.skinheight = (4, 4)
-        skin = null_skin((mdl.skinwidth, mdl.skinheight))
-    else:
-        image = uvt.data[0].image
+    images = get_materials_images(mesh)
+    for image in images:
         mdl.skinwidth, mdl.skinheight = [256, 256]
         skin = convert_image(image)
-    mdl.skins.append(skin)
+        mdl.skins.append(skin)
 
 def build_tris(mesh):
     # mdl files have a 1:1 relationship between stverts and 3d verts.
@@ -190,7 +196,16 @@ def calc_average_area(mdl):
         a = Vector(verts[0].r) - Vector(verts[1].r)
         b = Vector(verts[2].r) - Vector(verts[1].r)
         c = a.cross(b)
-        totalarea += (c * c) ** 0.5 / 2.0
+        c.x = (c.x * c.x) ** 0.5 / 2.0
+
+        print(c.y)
+        print(c.y * c.y)
+        print((c.y * c.y) ** 0.5 / 2.0)
+        c.y = ((c.y * c.y) ** 0.5 / 2.0)
+
+        c.z = (c.z * c.z) ** 0.5 / 2.0
+
+        totalarea += (c.x * c.y * c.z)
     return totalarea / len(mdl.tris)
 
 def get_properties(operator, mdl, obj):

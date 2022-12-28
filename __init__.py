@@ -159,18 +159,18 @@ def menu_func_export(self, context):
 
 
 def register():
-    # bpy.utils.register_module(__name__)
     bpy.utils.register_class(ImportMDL6)
     bpy.utils.register_class(ExportMDL6)
+    bpy.utils.register_class(QFMDLSettings)
 
-    # bpy.types.Object.qfmdl = PointerProperty(type=QFMDLSettings)
+    bpy.types.Object.qfmdl = bpy.props.PointerProperty(type=QFMDLSettings, name="qfmdl")
 
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
 
 
 def unregister():
-    # bpy.utils.unregister_module(__name__)
+    bpy.utils.unregister_class(QFMDLSettings)
     bpy.utils.unregister_class(ExportMDL6)
     bpy.utils.unregister_class(ImportMDL6)
 

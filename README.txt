@@ -1,6 +1,6 @@
-Quake MDL format (for Blender 2.7x)
+Quake MDL format (for Blender 2.83)
 written by Bill Currie
-modified by epiplon
+maintened by epiplon
 
 1. Info
 This extension converts a mesh to a compatible .mdl format.

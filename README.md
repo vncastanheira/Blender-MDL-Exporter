@@ -1,5 +1,6 @@
-# Quake MDL format (for Blender 2.83)
+# Quake MDL import/export plugin for Blender
 
+![](1329413609-plugin_01_small.jpg)
 
 ## Info
 This extension converts a mesh to a compatible .mdl format.

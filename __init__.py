@@ -23,15 +23,16 @@
 
 bl_info = {
     "name": "Quake MDL format",
-    "author": "Bill Currie (epiplon build 4)",
-    "blender": (2, 80, 3),
+    "author": "Bill Currie, Aleksander Marhall",
+    "version": (0, 7, 3),
+    "blender": (2, 80, 0),
     "api": 35622,
     "location": "File > Import-Export",
     "description": "Import-Export Quake MDL (version 6) files. (.mdl)",
-    # "warning": "it works",
-    "wiki_url": "",
+    "warning": "still work in progress",
+    "wiki_url": "https://bitbucket.org/khreathor/mdl-for-blender/wiki/Home",
     "tracker_url": "",
-#    "support": 'OFFICIAL',
+#   "support": 'OFFICIAL',
     "category": "Import-Export"}
 
 # To support reload properly, try to access a package var, if it's there,
@@ -49,8 +50,14 @@ from bpy.props import BoolProperty, FloatProperty, StringProperty, EnumProperty
 from bpy.props import FloatVectorProperty, PointerProperty
 from bpy_extras.io_utils import ExportHelper, ImportHelper, path_reference_mode, axis_conversion
 
+PALETTE=(
+    ('PAL_QUAKE', "Quake", "Quake palette"),
+    ('PAL_HEXEN2', "Hexen 2", "Hexen 2 palette"),
+    #('PAL_CUSTOM', "Custom", "Custom palette from file"),
+)
+
 SYNCTYPE=(
-    ('ST_SYNC', "Syncronized", "Automatic animations are all together"),
+    ('ST_SYNC', "Synchronized", "Automatic animations are all together"),
     ('ST_RAND', "Random", "Automatic animations have random offsets"),
 )
 
@@ -66,43 +73,66 @@ EFFECTS=(
 )
 
 class QFMDLSettings(bpy.types.PropertyGroup):
-    eyeposition = FloatVectorProperty(
+    palette: EnumProperty(
+        items=PALETTE,
+        name="Palette",
+        description="Palette")
+    eyeposition: FloatVectorProperty(
         name="Eye Position",
         description="View possion relative to object origin")
-    synctype = EnumProperty(
+    synctype: EnumProperty(
         items=SYNCTYPE,
         name="Sync Type",
         description="Add random time offset for automatic animations")
-    rotate = BoolProperty(
+    rotate: BoolProperty(
         name="Rotate",
         description="Rotate automatically (for pickup items)")
-    effects = EnumProperty(
+    alpha: BoolProperty(
+        name="Transparency",
+        description="Enable transparency using color index 255",
+        default=False)
+    effects: EnumProperty(
         items=EFFECTS,
         name="Effects",
         description="Particle trail effects")
+
     #doesn't work :(
     #script = PointerProperty(
     #    type=bpy.types.Object,
     #    name="Script",
     #    description="Script for animating frames and skins")
-    script = StringProperty(
-        name="Script",
-        description="Script for animating frames and skins")
-    xform = BoolProperty(
+
+    xform: BoolProperty(
         name="Auto transform",
         description="Auto-apply location/rotation/scale when exporting",
         default=True)
-    md16 = BoolProperty(
+    md16: BoolProperty(
         name="16-bit",
         description="16 bit vertex coordinates: QuakeForge only")
+    xform: BoolProperty(
+        name="Auto transform",
+        description="Auto-apply location/rotation/scale when exporting",
+        default=True)
+    md16: BoolProperty(
+        name="16-bit",
+        description="16 bit vertex coordinates: QuakeForge only")
+    #script = StringProperty(
+    #    name="Script",
+    #    description="Script for animating frames and skins")
 
 class ImportMDL6(bpy.types.Operator, ImportHelper):
     '''Load a Quake MDL (v6) File'''
     bl_idname = "import_mesh.quake_mdl_v6"
     bl_label = "Import MDL"
+    bl_options = {'PRESET'}
 
     filename_ext = ".mdl"
     filter_glob = StringProperty(default="*.mdl", options={'HIDDEN'})
+
+    palette: EnumProperty(
+        items=PALETTE,
+        name="Palette",
+        description="Palette")
 
     def execute(self, context):
         from . import import_mdl
@@ -114,9 +144,42 @@ class ExportMDL6(bpy.types.Operator, ExportHelper):
 
     bl_idname = "export_mesh.quake_mdl_v6"
     bl_label = "Export MDL"
+    bl_options = {'PRESET'}
 
     filename_ext = ".mdl"
-    filter_glob = StringProperty(default="*.mdl", options={'HIDDEN'})
+    filter_glob: StringProperty(default="*.mdl", options={'HIDDEN'})
+
+    palette: EnumProperty(
+        items=PALETTE,
+        name="Palette",
+        description="Palette")
+    eyeposition: FloatVectorProperty(
+        name="Eye Position",
+        description="View possion relative to object origin")
+        #default = bpy.context.active_object.qfmdl.eyeposition)
+    synctype: EnumProperty(
+        items=SYNCTYPE,
+        name="Sync Type",
+        description="Add random time offset for automatic animations")
+    rotate: BoolProperty(
+        name="Rotate",
+        description="Rotate automatically (for pickup items)",
+        default=False)
+    alpha: BoolProperty(
+        name="Transparency",
+        description="Enable transparency using color index 255",
+        default=False)
+    effects: EnumProperty(
+        items=EFFECTS,
+        name="Effects",
+        description="Particle trail effects")
+    xform: BoolProperty(
+        name="Auto transform",
+        description="Auto-apply location/rotation/scale when exporting",
+        default=True)
+    md16: BoolProperty(
+        name="16-bit",
+        description="16 bit vertex coordinates: QuakeForge only")
 
     @classmethod
     def poll(cls, context):
@@ -128,20 +191,34 @@ class ExportMDL6(bpy.types.Operator, ExportHelper):
         keywords = self.as_keywords (ignore=("check_existing", "filter_glob"))
         return export_mdl.export_mdl(self, context, **keywords)
 
-class MDLPanel(bpy.types.Panel):
+    '''
+    def invoke(self, context, event):
+        self.eyeposition = bpy.context.active_object.qfmdl.eyeposition
+        return {'FINISHED'}
+    '''
+
+
+class OBJECT_PT_MDLPanel(bpy.types.Panel):
+    bl_label = "MDL Properties"
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
     bl_context = 'object'
-    bl_label = 'QF MDL'
+    bl_options = {'DEFAULT_CLOSED'}
 
     @classmethod
     def poll(cls, context):
         obj = context.active_object
         return obj and obj.type == 'MESH'
 
+    def draw_header(self, context):
+        layout = self.layout
+        obj = context.object
+        layout.prop(obj, "select", text="")
+
     def draw(self, context):
         layout = self.layout
         obj = context.active_object
+        layout.prop(obj.qfmdl, "palette")
         layout.prop(obj.qfmdl, "eyeposition")
         layout.prop(obj.qfmdl, "synctype")
         layout.prop(obj.qfmdl, "rotate")
@@ -150,6 +227,7 @@ class MDLPanel(bpy.types.Panel):
         layout.prop(obj.qfmdl, "xform")
         layout.prop(obj.qfmdl, "md16")
 
+
 def menu_func_import(self, context):
     self.layout.operator(ImportMDL6.bl_idname, text="Quake MDL (.mdl)")
 
@@ -157,22 +235,25 @@ def menu_func_import(self, context):
 def menu_func_export(self, context):
     self.layout.operator(ExportMDL6.bl_idname, text="Quake MDL (.mdl)")
 
+classes = (
+    QFMDLSettings,
+    #OBJECT_PT_MDLPanel,
+    ImportMDL6,
+    ExportMDL6
+)
 
 def register():
-    bpy.utils.register_class(ImportMDL6)
-    bpy.utils.register_class(ExportMDL6)
-    bpy.utils.register_class(QFMDLSettings)
+    for cls in classes:
+        bpy.utils.register_class(cls)
 
-    bpy.types.Object.qfmdl = bpy.props.PointerProperty(type=QFMDLSettings, name="qfmdl")
+    bpy.types.Object.qfmdl = PointerProperty(type=QFMDLSettings)
 
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
 
-
 def unregister():
-    bpy.utils.unregister_class(QFMDLSettings)
-    bpy.utils.unregister_class(ExportMDL6)
-    bpy.utils.unregister_class(ImportMDL6)
+    for cls in classes:
+        bpy.utils.unregister_class(cls)
 
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)

@@ -23,7 +23,8 @@ import bpy
 from bpy_extras.object_utils import object_data_add
 from mathutils import Vector,Matrix
 
-from .quakepal import palette
+from .quakepal import quakepal
+from .hexen2pal import hexen2pal
 from .mdl import MDL
 from .qfplist import pldata
 
@@ -39,7 +40,7 @@ def make_verts(mdl, framenum, subframenum=0):
                 (  0,  0,s.z,o.z),
                 (  0,  0,  0,  1)))
     for v in frame.verts:
-        verts.append(m @ Vector(v.r)) # 2.8+ Matrix-Vector multiplication
+        verts.append(m @ Vector(v.r))
     return verts
 
 def make_faces(mdl):
@@ -56,7 +57,7 @@ def make_faces(mdl):
                 s += mdl.skinwidth / 2
             # quake textures are top to bottom, but blender images
             # are bottom to top
-            sts.append((s * 1.0 / mdl.skinwidth, 1 - t * 1.0 / mdl.skinheight))
+            sts.append(((s + 0.5) / mdl.skinwidth, 1 - (t + 0.5) / mdl.skinheight))
         # blender's and quake's vertex order seem to be opposed
         tv.reverse()
         sts.reverse()
@@ -71,6 +72,10 @@ def make_faces(mdl):
 
 def load_skins(mdl):
     def load_skin(skin, name):
+        if mdl.palette == 0:
+            pal = quakepal
+        else:
+            pal = hexen2pal
         skin.name = name
         img = bpy.data.images.new(name, mdl.skinwidth, mdl.skinheight)
         mdl.images.append(img)
@@ -78,7 +83,7 @@ def load_skins(mdl):
         d = skin.pixels
         for j in range(mdl.skinheight):
             for k in range(mdl.skinwidth):
-                c = palette[d[j * mdl.skinwidth + k]]
+                c = pal[d[j * mdl.skinwidth + k]]
                 # quake textures are top to bottom, but blender images
                 # are bottom to top
                 l = ((mdl.skinheight - 1 - j) * mdl.skinwidth + k) * 4
@@ -98,30 +103,80 @@ def load_skins(mdl):
         else:
             load_skin(skin, "%s_%d" % (mdl.name, i))
 
+def setup_main_material(mdl):
+    mat = bpy.data.materials.new(mdl.name)
+    mat.blend_method = 'OPAQUE'
+    mat.diffuse_color = (1, 1, 1, 1)
+    mat.metallic = 1
+    mat.roughness = 1
+    mat.specular_intensity = 0
+    mat.use_nodes = True
+    return mat
+
 def setup_skins(mdl, uvs):
     load_skins(mdl)
-    img = mdl.images[0]   # use the first skin for now
-    uvlay = mdl.mesh.uv_textures.new(mdl.name)
-    uvloop = mdl.mesh.uv_layers[0]
-    for i, texpoly in enumerate(uvlay.data):
+#    img = mdl.images[0]   # use the first skin for now
+#    uvlay = mdl.mesh.uv_textures.new(mdl.name)
+#    uvloop = mdl.mesh.uv_layers[0]
+#    for i, texpoly in enumerate(uvlay.data):
+    uvloop = mdl.mesh.uv_layers.new(name = mdl.name)
+    for i in range(len(mdl.mesh.polygons)):
         poly = mdl.mesh.polygons[i]
         mdl_uv = uvs[i]
-        texpoly.image = img
+#        texpoly.image = img	# TODO: commented out by jazz
         for j,k in enumerate(poly.loop_indices):
             uvloop.data[k].uv = mdl_uv[j]
-    mat = bpy.data.materials.new(mdl.name)
-    mat.diffuse_color = (1,1,1)
-    mat.use_raytrace = False
-    tex = bpy.data.textures.new(mdl.name, 'IMAGE')
-    tex.extension = 'CLIP'
-    tex.use_preview_alpha = True
-    tex.image = img
-    mat.texture_slots.add()
-    ts = mat.texture_slots[0]
-    ts.texture = tex
-    ts.use_map_alpha = True
-    ts.texture_coords = 'UV'
-    mdl.mesh.materials.append(mat)
+
+    #Load all skins
+    img_counter = 0
+    for i, skin in enumerate(mdl.skins):
+        if skin.type:
+            mat = setup_main_material(mdl)
+            emissionNode = mat.node_tree.nodes.new("ShaderNodeEmission")
+            shaderOut = mat.node_tree.nodes["Material Output"]
+            mat.node_tree.nodes.remove(mat.node_tree.nodes["Principled BSDF"])
+
+            emissionNode.location = (0, 0)
+            shaderOut.location = (200, 0)
+
+            yPos = 0
+
+            for j, subskin in enumerate(skin.skins):
+                tex_node = mat.node_tree.nodes.new("ShaderNodeTexImage")
+                tex_node.image = mdl.images[img_counter]
+                img_counter += 1
+                tex_node.interpolation = "Closest"
+
+                tex_node.location = (-300, yPos)
+                yPos -= 280
+
+                if j == 0:
+                    # connect only first texture (we'll need something smarter in the future)
+                    mat.node_tree.links.new(tex_node.outputs[0], emissionNode.inputs[0])
+
+            mat.node_tree.links.new(emissionNode.outputs[0], shaderOut.inputs[0])
+            mdl.mesh.materials.append(mat)
+
+        else:
+            mat = setup_main_material(mdl)
+
+            # TODO: turn transform to True and position it properly in editor
+            emissionNode = mat.node_tree.nodes.new("ShaderNodeEmission")
+            shaderOut = mat.node_tree.nodes["Material Output"]
+            mat.node_tree.nodes.remove(mat.node_tree.nodes["Principled BSDF"])
+
+            tex_node = mat.node_tree.nodes.new("ShaderNodeTexImage")
+            tex_node.image = mdl.images[img_counter]
+            img_counter += 1
+            tex_node.interpolation = "Closest"
+
+            emissionNode.location = (0, 0)
+            shaderOut.location = (200, 0)
+            tex_node.location = (-300, 0)
+
+            mat.node_tree.links.new(tex_node.outputs[0], emissionNode.inputs[0])
+            mat.node_tree.links.new(emissionNode.outputs[0], shaderOut.inputs[0])
+            mdl.mesh.materials.append(mat)
 
 def make_shape_key(mdl, framenum, subframenum=0):
     frame = mdl.frames[framenum]
@@ -133,7 +188,7 @@ def make_shape_key(mdl, framenum, subframenum=0):
         name = frame.name
     else:
         frame.name = name
-    frame.key = mdl.obj.shape_key_add(name)
+    frame.key = mdl.obj.shape_key_add(name=name)
     frame.key.value = 0.0
     mdl.keys.append(frame.key)
     s = Vector(mdl.scale)
@@ -143,20 +198,25 @@ def make_shape_key(mdl, framenum, subframenum=0):
                 (  0,  0,s.z,o.z),
                 (  0,  0,  0,  1)))
     for i, v in enumerate(frame.verts):
-        frame.key.data[i].co = m * Vector(v.r)
+        frame.key.data[i].co = m @ Vector(v.r)
 
 def build_shape_keys(mdl):
     mdl.keys = []
-    mdl.obj.shape_key_add("Basis")
+    mdl.obj.shape_key_add(name="Basis",from_mix=False)
     mdl.mesh.shape_keys.name = mdl.name
     mdl.obj.active_shape_key_index = 0
+    bpy.context.scene.frame_end = 0
     for i, frame in enumerate(mdl.frames):
         frame = mdl.frames[i]
         if frame.type:
             for j in range(len(frame.frames)):
                 make_shape_key(mdl, i, j)
+                bpy.context.scene.frame_end += 1
         else:
             make_shape_key(mdl, i)
+            bpy.context.scene.frame_end += 1
+
+    bpy.context.scene.frame_start = 1
 
 def set_keys(act, data):
     for d in data:
@@ -171,9 +231,9 @@ def set_keys(act, data):
 def build_actions(mdl):
     sk = mdl.mesh.shape_keys
     ad = sk.animation_data_create()
-    track = ad.nla_tracks.new();
+    track = ad.nla_tracks.new()
     track.name = mdl.name
-    start_frame = 1.0
+    start_frame = 1
     for frame in mdl.frames:
         act = bpy.data.actions.new(frame.name)
         data = []
@@ -206,7 +266,7 @@ def build_actions(mdl):
             for k in other_keys:
                 data.append((k, co))
         set_keys(act, data)
-        track.strips.new(act.name, start_frame, act)
+        track.strips.new(act.name, int(start_frame), act)
         start_frame += act.frame_range[1]
 
 def merge_frames(mdl):
@@ -334,15 +394,15 @@ def set_properties(mdl):
     except IndexError:
         mdl.obj.qfmdl.synctype = 'ST_SYNC'
     mdl.obj.qfmdl.rotate = (mdl.flags & MDL.EF_ROTATE) and True or False
+    mdl.obj.qfmdl.alpha = (mdl.flags & MDL.MF_HOLEY) and True or False
     mdl.obj.qfmdl.effects = parse_flags(mdl.flags)
-    mdl.obj.qfmdl.script = mdl.text.name #FIXME really want the text object
+    #mdl.obj.qfmdl.script = mdl.text.name #FIXME really want the text object
     mdl.obj.qfmdl.md16 = (mdl.ident == "MD16")
 
-def import_mdl(operator, context, filepath):
-    userPreferenceGlobalUndo = bpy.context.preferences.edit.use_global_undo
+def import_mdl(operator, context, filepath, palette = 'PAL_QUAKE'):
     bpy.context.preferences.edit.use_global_undo = False
 
-    for obj in bpy.context.scene.objects:
+    for obj in bpy.context.scene.collection.objects:
         obj.select_set(False)
 
     mdl = MDL()
@@ -355,10 +415,15 @@ def import_mdl(operator, context, filepath):
     mdl.mesh = bpy.data.meshes.new(mdl.name)
     mdl.mesh.from_pydata(verts, [], faces)
     mdl.obj = bpy.data.objects.new(mdl.name, mdl.mesh)
-    bpy.context.collection.objects.link(mdl.obj)
-    bpy.context.view_layer.objects.active = mdl.obj
+
+    bpy.context.scene.collection.objects.link(mdl.obj)
     mdl.obj.select_set(True)
+    bpy.context.view_layer.objects.active = mdl.obj
+    mdl.palette = MDL.PALETTE[palette]
     setup_skins(mdl, uvs)
+
+    bpy.context.scene.frame_start = 1
+    bpy.context.scene.frame_end = 1
     if len(mdl.frames) > 1 or mdl.frames[0].type:
         build_shape_keys(mdl)
         merge_frames(mdl)
@@ -368,5 +433,5 @@ def import_mdl(operator, context, filepath):
 
     mdl.mesh.update()
 
-    bpy.context.preferences.edit.use_global_undo = userPreferenceGlobalUndo
+    bpy.context.preferences.edit.use_global_undo = True
     return {'FINISHED'}

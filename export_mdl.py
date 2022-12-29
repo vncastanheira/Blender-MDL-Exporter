@@ -24,9 +24,11 @@ from bpy_extras.object_utils import object_data_add
 from mathutils import Vector,Matrix
 
 from .qfplist import pldata, PListError
-from .quakepal import palette
+from .quakepal import quakepal
+from .hexen2pal import hexen2pal
 from .quakenorm import map_normal
 from .mdl import MDL
+from .__init__ import SYNCTYPE, EFFECTS
 
 def check_faces(mesh):
     #Check that all faces are tris because mdl does not support anything else.
@@ -49,21 +51,17 @@ def check_faces(mesh):
     mesh.update()
     return True
 
-def convert_image(img):
-    bright = bpy.context.active_object.get('bright', False)
-    maxcolors = 255
-    if not bright:
-        maxcolors = 223
-
-    newimg = img.copy()
-    newimg.scale(256, 256)
-
-    size = newimg.size
+def convert_image(image, palette):
+    if(palette == 0):
+        pal = quakepal
+    else:
+        pal = hexen2pal
+    size = image.size
     skin = MDL.Skin()
     skin.type = 0
     skin.pixels = bytearray(size[0] * size[1]) # preallocate
     cache = {}
-    pixels = newimg.pixels[:]
+    pixels = image.pixels[:]
     for y in range(size[1]):
         for x in range(size[0]):
             outind = y * size[0] + x
@@ -74,8 +72,8 @@ def convert_image(img):
             rgb = tuple(map(lambda x: int(x * 255 + 0.5), rgb))
             if rgb not in cache:
                 best = (3*256*256, -1)
-                for i, p in enumerate(palette):
-                    if i > maxcolors:     # should never happen
+                for i, p in enumerate(pal):
+                    if i > 255:     # should never happen
                         break
                     r = 0
                     for x in map(lambda a, b: (a - b) ** 2, rgb, p):
@@ -84,8 +82,6 @@ def convert_image(img):
                         best = (r, i)
                 cache[rgb] = best[1]
             skin.pixels[outind] = cache[rgb]
-    
-    bpy.data.images.remove(newimg)
     return skin
 
 def null_skin(size):
@@ -100,24 +96,59 @@ def active_uv(mesh):
             return uvt
     return None
 
-def get_materials_images(mesh):
-    node_trees = [m.node_tree for m in mesh.materials]
-    images = []
-    for nt in node_trees:
-        for n in nt.nodes:
-            if n.bl_idname == 'ShaderNodeTexImage':
-                images.append(n.image)
-            
-    return images
+def make_skin(operator, mdl, mesh):
+    uvt = active_uv(mesh)
+    mdl.skinwidth, mdl.skinheight = (4, 4)
+    skin = null_skin((mdl.skinwidth, mdl.skinheight))
 
-def make_skin(mdl, mesh):
-    images = get_materials_images(mesh)
-    for image in images:
-        mdl.skinwidth, mdl.skinheight = [256, 256]
-        skin = convert_image(image)
-        mdl.skins.append(skin)
+    materials = bpy.context.object.data.materials
 
-def build_tris(mesh):
+    if len(materials) > 0:
+        for mat in materials:
+            if mat:
+                if mat.use_nodes:
+                    allTextureNodes = list(filter(lambda node: node.type == "TEX_IMAGE", mat.node_tree.nodes))
+                    if len(allTextureNodes) > 1:                            #=== skingroup
+                        skingroup = MDL.Skin()
+                        skingroup.type = 1
+                        skingroup.skins = []
+                        skingroup.times = []
+                        sortedNodes = list(allTextureNodes)
+                        sortedNodes.sort(key=lambda x: x.location[1], reverse=True)
+                        for node in sortedNodes:
+                            if node.type == "TEX_IMAGE":
+                                image = node.image
+                                mdl.skinwidth, mdl.skinheight = image.size
+                                skin = convert_image(image,mdl.palette)
+                                skingroup.skins.append(skin)
+                                skingroup.times.append(0.1)                 # hardcoded at the moment
+                        mdl.skins.append(skingroup)
+                    elif len(allTextureNodes) == 1:                         #=== single skin
+                        for node in allTextureNodes:
+                            if node.type == "TEX_IMAGE":
+                                image = node.image
+                                mdl.skinwidth, mdl.skinheight = image.size
+                                skin = convert_image(image,mdl.palette)
+                                mdl.skins.append(skin)
+                    else:
+                        mdl.skins.append(skin)                              # add empty skin - no texture nodes
+    else:
+        mdl.skins.append(skin)                                      # add empty skin - no materials
+
+    '''
+    if (uvt and uvt.data and uvt.data[0].image):
+        image = uvt.data[0].image
+        if (uvt.data[0].image.size[0] and uvt.data[0].image.size[1]):
+            mdl.skinwidth, mdl.skinheight = image.size
+            skin = convert_image(image)
+        else:
+            operator.report({'WARNING'},
+                            "Texture '%s' invalid (missing?)." % image.name)
+    
+    mdl.skins.append(skin)
+    '''
+
+def build_tris(meshes):
     # mdl files have a 1:1 relationship between stverts and 3d verts.
     # a bit sucky, but it does allow faces to take less memory
     #
@@ -127,31 +158,34 @@ def build_tris(mesh):
     # the layout. However, there seems to be nothing in the mdl format
     # preventing the use of duplicate 3d vertices to allow complete freedom
     # of the UV layout.
-    uvtex = active_uv(mesh)
-    uvfaces = mesh.uv_layers[uvtex.name].data
+
     stverts = []
     tris = []
-    vertmap = []    # map mdl vert num to blender vert num (for 3d verts)
+    vertmap = list()    # map mdl vert num to blender vert num (for 3d verts)
     vuvdict = {}
-    for face in mesh.polygons:
-        fv = list(face.vertices)
-        uv = uvfaces[face.loop_start:face.loop_start + face.loop_total]
-        uv = list(map(lambda a: a.uv, uv))
-        face_tris = []
-        for i in range(1, len(fv) - 1):
-            # blender's and quake's vertex order are opposed
-            face_tris.append([(fv[0], tuple(uv[0])),
-                              (fv[i + 1], tuple(uv[i + 1])),
-                              (fv[i], tuple(uv[i]))])
-        for ft in face_tris:
-            tv = []
-            for vuv in ft:
-                if vuv not in vuvdict:
-                    vuvdict[vuv] = len(stverts)
-                    vertmap.append(vuv[0])
-                    stverts.append(vuv[1])
-                tv.append(vuvdict[vuv])
-            tris.append(MDL.Tri(tv))
+
+    for m in range(len(meshes)):
+        uvfaces = meshes[m].uv_layers.active.data
+        vertmap.append([])
+        for face in meshes[m].polygons:
+            fv = list(face.vertices)
+            uv = uvfaces[face.loop_start:face.loop_start + face.loop_total]
+            uv = list(map(lambda a: a.uv, uv))
+            face_tris = []
+            for i in range(1, len(fv) - 1):
+                # blender's and quake's vertex order are opposed
+                face_tris.append([(fv[0], tuple(uv[0])),
+                                  (fv[i + 1], tuple(uv[i + 1])),
+                                  (fv[i], tuple(uv[i]))])
+            for ft in face_tris:
+                tv = []
+                for vuv in ft:
+                    if vuv not in vuvdict:
+                        vuvdict[vuv] = len(stverts)
+                        vertmap[m].append(vuv[0])
+                        stverts.append(vuv[1])
+                    tv.append(vuvdict[vuv])
+                tris.append(MDL.Tri(tv))
     return tris, stverts, vertmap
 
 def convert_stverts(mdl, stverts):
@@ -166,8 +200,15 @@ def convert_stverts(mdl, stverts):
         t = ((t % mdl.skinheight) + mdl.skinheight) % mdl.skinheight
         stverts[i] = MDL.STVert((s, t))
 
-def make_frame(mesh, vertmap):
-    frame = MDL.Frame()
+def make_frame(frame, mesh, vertmap):
+    #frame = MDL.Frame()
+    #frame.name = "frame" + str(idx)
+
+    #if bpy.context.object.data.shape_keys:
+    #    shape_keys_amount = len(bpy.context.object.data.shape_keys.key_blocks)
+    #    if shape_keys_amount > idx:
+    #        frame.name = bpy.context.object.data.shape_keys.key_blocks[idx].name
+
     for v in vertmap:
         mv = mesh.vertices[v]
         vert = MDL.Vert(tuple(mv.co), map_normal(mv.normal))
@@ -196,21 +237,35 @@ def calc_average_area(mdl):
         a = Vector(verts[0].r) - Vector(verts[1].r)
         b = Vector(verts[2].r) - Vector(verts[1].r)
         c = a.cross(b)
-        c.x = (c.x * c.x) ** 0.5 / 2.0
-        c.y = ((c.y * c.y) ** 0.5 / 2.0)
-        c.z = (c.z * c.z) ** 0.5 / 2.0
-        totalarea += (c.x * c.y * c.z)
+        totalarea += (c @ c) ** 0.5 / 2.0
     return totalarea / len(mdl.tris)
 
-def get_properties(operator, mdl, obj):
-    mdl.eyeposition = tuple(obj.qfmdl.eyeposition)
-    mdl.synctype = MDL.SYNCTYPE[obj.qfmdl.synctype]
-    mdl.flags = ((obj.qfmdl.rotate and MDL.EF_ROTATE or 0)
-                 | MDL.EFFECTS[obj.qfmdl.effects])
-    if obj.qfmdl.md16:
+def get_properties(
+            operator,
+            mdl,
+            palette,
+            eyeposition,
+            synctype,
+            rotate,
+            alpha,
+            effects,
+            xform,
+            md16):
+    mdl.palette = MDL.PALETTE[palette]
+    mdl.eyeposition = eyeposition
+    mdl.synctype = MDL.SYNCTYPE[synctype]
+    mdl.flags = ((rotate and MDL.EF_ROTATE or 0)
+                 | (alpha and MDL.MF_HOLEY or 0)
+                 | MDL.EFFECTS[effects])
+    if md16:
         mdl.ident = "MD16"
-    script = obj.qfmdl.script
+
+    script = None
     mdl.script = None
+
+    '''
+    #tomporarily disabled
+    #script = obj.qfmdl.script
     if script:
         try:
             script = bpy.data.texts[script].as_string()
@@ -224,6 +279,7 @@ def get_properties(operator, mdl, obj):
         except PListError as err:
             operator.report({'ERROR'}, "Script error: %s." % err)
             return False
+    '''
     return True
 
 def process_skin(mdl, skin, ingroup=False):
@@ -247,15 +303,15 @@ def process_skin(mdl, skin, ingroup=False):
         #FIXME error handling
         name = skin['name']
         image = bpy.data.images[name]
-        mdl.skinwidth, mdl.skinheight = [256, 256]
-        # if hasattr(mdl, 'skinwidth'):
-        #     if (mdl.skinwidth != 256:
-        #         or mdl.skinheight != 256:
-        #         raise ValueError("%s: different skin size (%d %d) (%d %d)"
-        #                          % (name, mdl.skinwidth, mdl.skinheight,
-        #                             int(256), int(256)))
-        # else:
-        sk = convert_image(image)
+        if hasattr(mdl, 'skinwidth'):
+            if (mdl.skinwidth != image.size[0]
+                or mdl.skinheight != image.size[1]):
+                raise ValueError("%s: different skin size (%d %d) (%d %d)"
+                                 % (name, mdl.skinwidth, mdl.skinheight,
+                                    int(image.size[0]), int(image.size[1])))
+        else:
+            mdl.skinwidth, mdl.skinheight = image.size
+        sk = convert_image(image, mdl.palette)
         return sk
 
 def process_frame(mdl, scene, frame, vertmap, ingroup = False,
@@ -286,43 +342,93 @@ def process_frame(mdl, scene, frame, vertmap, ingroup = False,
         mdl.frames += fr.frames[:-1]
         return fr.frames[-1]
     scene.frame_set(int(frameno), frameno - int(frameno))
-    mesh = mdl.obj.to_mesh()
+    mesh = mdl.obj.to_mesh(scene, True, 'PREVIEW') #wysiwyg?
     if mdl.obj.qfmdl.xform:
         mesh.transform(mdl.obj.matrix_world)
     fr = make_frame(mesh, vertmap)
     fr.name = name
     return fr
 
-def export_mdl(operator, context, filepath):
-    obj = context.active_object
-    mesh = obj.to_mesh()
-    #if not check_faces(mesh):
-    #    operator.report({'ERROR'},
-    #                    "Mesh has faces with more than 3 vertices.")
-    #    return {'CANCELLED'}
-    mdl = MDL(obj.name)
-    mdl.obj = obj
-    if not get_properties(operator, mdl, obj):
-        return {'CANCELLED'}
-    mdl.tris, mdl.stverts, vertmap = build_tris(mesh)
-    if mdl.script:
-        if 'skins' in mdl.script:
-            for skin in mdl.script['skins']:
-                mdl.skins.append(process_skin(mdl, skin))
-        if 'frames' in mdl.script:
-            for frame in mdl.script['frames']:
-                mdl.frames.append(process_frame(mdl, context.scene, frame,
-                                                vertmap))
-    if not mdl.skins:
-        make_skin(mdl, mesh)
+def name_frame(frame_number):
+    if bpy.context.object.data.shape_keys:
+        shape_keys_amount = len(bpy.context.object.data.shape_keys.key_blocks)
+        if shape_keys_amount > frame_number:
+            return bpy.context.object.data.shape_keys.key_blocks[frame_number].name
+    #else:
+    return "frame" + str(frame_number)
+
+def export_mdl(
+    operator,
+    context,
+    filepath = "",
+    palette = 'PAL_QUAKE',
+    eyeposition = (0.0, 0.0, 0.0),
+    synctype = SYNCTYPE[1],
+    rotate = False,
+    alpha = False,
+    effects = EFFECTS[1],
+    xform = True,
+    md16 = False
+    ):
+
+    print("Start MDL Export...\n")
+
+    firstObj = True
+    meshes = []
+    objects = context.selected_objects
+    if not objects:
+        bpy.ops.object.select_all(action='SELECT')
+        objects = context.selected_objects
+        if objects:
+            context.view_layer.objects.active = objects[0]
+        else:
+            return {'CANCELLED'}
+    for i in range(len(objects)):
+        print("Object name: " + str(objects[i].name))
+        if objects[i].type == 'MESH':
+            bpy.ops.object.select_all(action='DESELECT')
+            objects[i].select_set(True)
+            context.view_layer.objects.active = objects[i]
+            objects[i].update_from_editmode()
+            depsgraph = context.evaluated_depsgraph_get()
+            ob_eval = objects[i].evaluated_get(depsgraph)
+            mesh = ob_eval.to_mesh()
+            meshes.append(mesh)
+            if firstObj == True:
+                mdl = MDL(objects[0].name)
+                mdl.obj = objects[0]
+                firstObj = False
+                if not mdl.skins:
+                    make_skin(operator, mdl, mesh)
+            if not get_properties(
+                    operator,
+                    mdl,
+                    palette,
+                    eyeposition,
+                    synctype,
+                    rotate,
+                    alpha,
+                    effects,
+                    xform,
+                    md16):
+                        return {'CANCELLED'}
+    mdl.tris, mdl.stverts, vertmap = build_tris(meshes)
+
     if not mdl.frames:
-        curframe = context.scene.frame_current
-        for fno in range(1, curframe + 1):
+        for fno in range(context.scene.frame_start, context.scene.frame_end + 1):
             context.scene.frame_set(fno)
-            mesh = obj.to_mesh()
-            if mdl.obj.qfmdl.xform:
-                mesh.transform(mdl.obj.matrix_world)
-            mdl.frames.append(make_frame(mesh, vertmap))
+            frame = MDL.Frame()
+            frame.name = name_frame(fno)
+            for i in range(len(objects)):
+                objects[i].update_from_editmode()
+                depsgraph = context.evaluated_depsgraph_get()
+                ob_eval = objects[i].evaluated_get(depsgraph)
+                mesh = ob_eval.to_mesh()
+                if xform:
+                    mesh.transform(mdl.obj.matrix_world)
+                frame = make_frame(frame, mesh, vertmap[i])
+            mdl.frames.append(frame)
+
     convert_stverts(mdl, mdl.stverts)
     mdl.size = calc_average_area(mdl)
     scale_verts(mdl)

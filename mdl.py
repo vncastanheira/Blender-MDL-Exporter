@@ -34,9 +34,12 @@ class MDL:
     EF_ZOMGIB = 32
     EF_TRACER2 = 64
     EF_TRACER3 = 128
+    MF_HOLEY = 16384
     EFFECTS={'EF_NONE':0, 'EF_ROCKET':EF_ROCKET, 'EF_GRENADE':EF_GRENADE,
              'EF_GIB':EF_GIB, 'EF_TRACER':EF_TRACER, 'EF_ZOMGIB':EF_ZOMGIB,
              'EF_TRACER2':EF_TRACER2, 'EF_TRACER3':EF_TRACER3}
+
+    PALETTE = {'PAL_QUAKE': 0, 'PAL_HEXEN2': 1}
 
     class Skin:
         def __init__(self):
@@ -311,6 +314,7 @@ class MDL:
         self.scale = (1.0, 1.0, 1.0)        #FIXME
         self.scale_origin = (0.0, 0.0, 0.0) #FIXME
         self.boundingradius = 1.0           #FIXME
+        self.palette = 0
         self.eyeposition = (0.0, 0.0, 0.0)  #FIXME
         self.synctype = MDL.ST_SYNC
         self.flags = 0          #FIXME config
@@ -327,6 +331,7 @@ class MDL:
         self.ident = self.read_string(4)
         self.version = self.read_int()
         if self.ident not in ["IDPO", "MD16"] or self.version not in [3, 6]:
+            self.file.close()
             return None
         self.scale = self.read_float(3)
         self.scale_origin = self.read_float(3)
@@ -386,3 +391,4 @@ class MDL:
         #write out the frames
         for frame in self.frames:
             frame.write(self)
+        self.file.close()

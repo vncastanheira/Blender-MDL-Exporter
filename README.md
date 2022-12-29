@@ -17,4 +17,4 @@ textures from getting bright colors.
 - export to destination file
 
 # Credits
-Original code written by Bill Currie. Currently developed by vncastanheira.
+Originally developed by Bill Currie for QuakeForge, updated for Blender 2.8 by khreathor with a little help of queenjaz.

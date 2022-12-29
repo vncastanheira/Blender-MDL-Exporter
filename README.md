@@ -2,6 +2,11 @@
 
 ![](1329413609-plugin_01_small.jpg)
 
+## Download
+
+- [2.8+ (works with 2.9x and 3.x)](https://github.com/vncastanheira/Blender-MDL-Exporter/archive/refs/heads/2.83.zip)
+- [2.7x (deprecated)](https://github.com/vncastanheira/Blender-MDL-Exporter/archive/refs/heads/2.7x.zip)
+
 ## Info
 This extension converts a mesh to a compatible .mdl format.
 The texture will be converted to 256x256 size and the colors will be mapped

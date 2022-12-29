@@ -197,14 +197,8 @@ def calc_average_area(mdl):
         b = Vector(verts[2].r) - Vector(verts[1].r)
         c = a.cross(b)
         c.x = (c.x * c.x) ** 0.5 / 2.0
-
-        print(c.y)
-        print(c.y * c.y)
-        print((c.y * c.y) ** 0.5 / 2.0)
         c.y = ((c.y * c.y) ** 0.5 / 2.0)
-
         c.z = (c.z * c.z) ** 0.5 / 2.0
-
         totalarea += (c.x * c.y * c.z)
     return totalarea / len(mdl.tris)
 

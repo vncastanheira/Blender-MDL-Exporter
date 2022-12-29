@@ -27,6 +27,7 @@ from .qfplist import pldata, PListError
 from .quakepal import palette
 from .quakenorm import map_normal
 from .mdl import MDL
+from .__init__ import SYNCTYPE, EFFECTS
 
 def check_faces(mesh):
     #Check that all faces are tris because mdl does not support anything else.
@@ -49,21 +50,13 @@ def check_faces(mesh):
     mesh.update()
     return True
 
-def convert_image(img):
-    bright = bpy.context.active_object.get('bright', False)
-    maxcolors = 255
-    if not bright:
-        maxcolors = 223
-
-    newimg = img.copy()
-    newimg.scale(256, 256)
-
-    size = newimg.size
+def convert_image(image):
+    size = image.size
     skin = MDL.Skin()
     skin.type = 0
     skin.pixels = bytearray(size[0] * size[1]) # preallocate
     cache = {}
-    pixels = newimg.pixels[:]
+    pixels = image.pixels[:]
     for y in range(size[1]):
         for x in range(size[0]):
             outind = y * size[0] + x
@@ -75,7 +68,7 @@ def convert_image(img):
             if rgb not in cache:
                 best = (3*256*256, -1)
                 for i, p in enumerate(palette):
-                    if i > maxcolors:     # should never happen
+                    if i > 255:     # should never happen
                         break
                     r = 0
                     for x in map(lambda a, b: (a - b) ** 2, rgb, p):
@@ -84,8 +77,6 @@ def convert_image(img):
                         best = (r, i)
                 cache[rgb] = best[1]
             skin.pixels[outind] = cache[rgb]
-    
-    bpy.data.images.remove(newimg)
     return skin
 
 def null_skin(size):
@@ -100,15 +91,18 @@ def active_uv(mesh):
             return uvt
     return None
 
-def make_skin(mdl, mesh):
+def make_skin(operator, mdl, mesh):
     uvt = active_uv(mesh)
-    if (not uvt or not uvt.data or not uvt.data[0].image):
-        mdl.skinwidth, mdl.skinheight = (4, 4)
-        skin = null_skin((mdl.skinwidth, mdl.skinheight))
-    else:
+    mdl.skinwidth, mdl.skinheight = (4, 4)
+    skin = null_skin((mdl.skinwidth, mdl.skinheight))
+    if (uvt and uvt.data and uvt.data[0].image):
         image = uvt.data[0].image
-        mdl.skinwidth, mdl.skinheight = [256, 256]
-        skin = convert_image(image)
+        if (uvt.data[0].image.size[0] and uvt.data[0].image.size[1]):
+            mdl.skinwidth, mdl.skinheight = image.size
+            skin = convert_image(image)
+        else:
+            operator.report({'WARNING'},
+                            "Texture '%s' invalid (missing?)." % image.name)
     mdl.skins.append(skin)
 
 def build_tris(mesh):
@@ -121,8 +115,7 @@ def build_tris(mesh):
     # the layout. However, there seems to be nothing in the mdl format
     # preventing the use of duplicate 3d vertices to allow complete freedom
     # of the UV layout.
-    uvtex = active_uv(mesh)
-    uvfaces = mesh.uv_layers[uvtex.name].data
+    uvfaces = mesh.uv_layers.active.data
     stverts = []
     tris = []
     vertmap = []    # map mdl vert num to blender vert num (for 3d verts)
@@ -193,14 +186,25 @@ def calc_average_area(mdl):
         totalarea += (c * c) ** 0.5 / 2.0
     return totalarea / len(mdl.tris)
 
-def get_properties(operator, mdl, obj):
-    mdl.eyeposition = tuple(obj.qfmdl.eyeposition)
-    mdl.synctype = MDL.SYNCTYPE[obj.qfmdl.synctype]
-    mdl.flags = ((obj.qfmdl.rotate and MDL.EF_ROTATE or 0)
-                 | MDL.EFFECTS[obj.qfmdl.effects])
-    if obj.qfmdl.md16:
+def get_properties(
+            operator,
+            mdl,
+            eyeposition,
+            synctype,
+            rotate,
+            effects,
+            xform,
+            md16):
+    mdl.eyeposition = eyeposition
+    mdl.synctype = MDL.SYNCTYPE[synctype]
+    mdl.flags = ((rotate and MDL.EF_ROTATE or 0)
+                 | MDL.EFFECTS[effects])
+    if md16:
         mdl.ident = "MD16"
-    script = obj.qfmdl.script
+
+    #tomporarily disabled
+    #script = obj.qfmdl.script
+    script = None
     mdl.script = None
     if script:
         try:
@@ -238,14 +242,14 @@ def process_skin(mdl, skin, ingroup=False):
         #FIXME error handling
         name = skin['name']
         image = bpy.data.images[name]
-        mdl.skinwidth, mdl.skinheight = [256, 256]
-        # if hasattr(mdl, 'skinwidth'):
-        #     if (mdl.skinwidth != 256:
-        #         or mdl.skinheight != 256:
-        #         raise ValueError("%s: different skin size (%d %d) (%d %d)"
-        #                          % (name, mdl.skinwidth, mdl.skinheight,
-        #                             int(256), int(256)))
-        # else:
+        if hasattr(mdl, 'skinwidth'):
+            if (mdl.skinwidth != image.size[0]
+                or mdl.skinheight != image.size[1]):
+                raise ValueError("%s: different skin size (%d %d) (%d %d)"
+                                 % (name, mdl.skinwidth, mdl.skinheight,
+                                    int(image.size[0]), int(image.size[1])))
+        else:
+            mdl.skinwidth, mdl.skinheight = image.size
         sk = convert_image(image)
         return sk
 
@@ -284,7 +288,18 @@ def process_frame(mdl, scene, frame, vertmap, ingroup = False,
     fr.name = name
     return fr
 
-def export_mdl(operator, context, filepath):
+def export_mdl(
+    operator,
+    context,
+    filepath = "",
+    eyeposition = (0.0, 0.0, 0.0),
+    synctype = SYNCTYPE[1],
+    rotate = False,
+    effects = EFFECTS[1],
+    xform = True,
+    md16 = False
+    ):
+
     obj = context.active_object
     mesh = obj.to_mesh(context.scene, True, 'PREVIEW') #wysiwyg?
     #if not check_faces(mesh):
@@ -293,8 +308,17 @@ def export_mdl(operator, context, filepath):
     #    return {'CANCELLED'}
     mdl = MDL(obj.name)
     mdl.obj = obj
-    if not get_properties(operator, mdl, obj):
-        return {'CANCELLED'}
+    if not get_properties(
+            operator,
+            mdl,
+            eyeposition,
+            synctype,
+            rotate,
+            effects,
+            xform,
+            md16):
+                return {'CANCELLED'}
+
     mdl.tris, mdl.stverts, vertmap = build_tris(mesh)
     if mdl.script:
         if 'skins' in mdl.script:
@@ -305,13 +329,13 @@ def export_mdl(operator, context, filepath):
                 mdl.frames.append(process_frame(mdl, context.scene, frame,
                                                 vertmap))
     if not mdl.skins:
-        make_skin(mdl, mesh)
+        make_skin(operator, mdl, mesh)
     if not mdl.frames:
         curframe = context.scene.frame_current
-        for fno in range(1, curframe + 1):
+        for fno in range(context.scene.frame_start, context.scene.frame_end + 1):
             context.scene.frame_set(fno)
             mesh = obj.to_mesh(context.scene, True, 'PREVIEW') #wysiwyg?
-            if mdl.obj.qfmdl.xform:
+            if xform:
                 mesh.transform(mdl.obj.matrix_world)
             mdl.frames.append(make_frame(mesh, vertmap))
     convert_stverts(mdl, mdl.stverts)

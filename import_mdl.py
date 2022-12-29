@@ -39,7 +39,7 @@ def make_verts(mdl, framenum, subframenum=0):
                 (  0,  0,s.z,o.z),
                 (  0,  0,  0,  1)))
     for v in frame.verts:
-        verts.append(m * Vector(v.r))
+        verts.append(m @ Vector(v.r)) # 2.8+ Matrix-Vector multiplication
     return verts
 
 def make_faces(mdl):
@@ -87,7 +87,7 @@ def load_skins(mdl):
                 p[l + 2] = c[2] / 255.0
                 p[l + 3] = 1.0
         img.pixels[:] = p[:]
-        img.pack(True)
+        img.pack()
         img.use_fake_user = True
 
     mdl.images=[]
@@ -339,10 +339,11 @@ def set_properties(mdl):
     mdl.obj.qfmdl.md16 = (mdl.ident == "MD16")
 
 def import_mdl(operator, context, filepath):
-    bpy.context.user_preferences.edit.use_global_undo = False
+    userPreferenceGlobalUndo = bpy.context.preferences.edit.use_global_undo
+    bpy.context.preferences.edit.use_global_undo = False
 
     for obj in bpy.context.scene.objects:
-        obj.select = False
+        obj.select_set(False)
 
     mdl = MDL()
     if not mdl.read(filepath):
@@ -354,9 +355,9 @@ def import_mdl(operator, context, filepath):
     mdl.mesh = bpy.data.meshes.new(mdl.name)
     mdl.mesh.from_pydata(verts, [], faces)
     mdl.obj = bpy.data.objects.new(mdl.name, mdl.mesh)
-    bpy.context.scene.objects.link(mdl.obj)
-    bpy.context.scene.objects.active = mdl.obj
-    mdl.obj.select = True
+    bpy.context.collection.objects.link(mdl.obj)
+    bpy.context.view_layer.objects.active = mdl.obj
+    mdl.obj.select_set(True)
     setup_skins(mdl, uvs)
     if len(mdl.frames) > 1 or mdl.frames[0].type:
         build_shape_keys(mdl)
@@ -367,5 +368,5 @@ def import_mdl(operator, context, filepath):
 
     mdl.mesh.update()
 
-    bpy.context.user_preferences.edit.use_global_undo = True
+    bpy.context.preferences.edit.use_global_undo = userPreferenceGlobalUndo
     return {'FINISHED'}

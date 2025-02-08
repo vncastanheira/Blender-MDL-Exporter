@@ -4,7 +4,7 @@
 
 ## Download
 
-- [2.8+ (works with 2.9x and 3.x)](https://github.com/vncastanheira/Blender-MDL-Exporter/releases/download/2.8/Blender-MDL-Exporter_2.8.zip)
+- [2.8+ (works with 2.9x, 3.x and 4.x)](https://github.com/vncastanheira/Blender-MDL-Exporter/releases/download/2.8/Blender-MDL-Exporter_2.8.zip)
 
 ## Info
 This extension converts a mesh to a compatible .mdl format.

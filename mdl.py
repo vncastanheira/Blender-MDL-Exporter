@@ -151,10 +151,12 @@ class MDL:
                 self.mins[i] = min(self.mins[i], frame.mins[i])
                 self.maxs[i] = max(self.maxs[i], frame.maxs[i])
         def scale(self, mdl):
-            self.mins = tuple(map(lambda x, s, t: int((x - t) / s),
-                                  self.mins, mdl.scale, mdl.scale_origin))
-            self.maxs = tuple(map(lambda x, s, t: int((x - t) / s),
-                                  self.maxs, mdl.scale, mdl.scale_origin))
+            default_scale = (1.0, 1.0, 1.0)
+            mdl.scale = tuple(s if s != 0 else 1.0 for s in mdl.scale)
+
+            self.mins = tuple(map(lambda x, s, t: int((x - t) / s), self.mins, mdl.scale, mdl.scale_origin))
+            self.maxs = tuple(map(lambda x, s, t: int((x - t) / s), self.maxs, mdl.scale, mdl.scale_origin))
+
             if self.type:
                 for subframe in self.frames:
                     subframe.scale(mdl)
